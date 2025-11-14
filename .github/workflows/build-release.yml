@@ -1,0 +1,125 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 Nathaniel Struselis
+#
+# GitHub Actions workflow to build the LaTeX document, version it using
+# git-cliff, and deploy it as a release on GitHub.
+
+name: Build and Release Document
+
+# Define environment variables for reuse in the workflow, so that they can be
+# easily updated in one place.
+env:
+  CHANGELOG_ARTIFACT_NAME: changelog
+  CHANGELOG_NAME: CHANGELOG.md
+  DOCUMENT_ARTIFACT_NAME: latex-build
+  DOCUMENT_BASE_NAME: Nathaniel_Struselis_CV
+
+# Releases will be triggered by changes pushed to main.
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write  # To create tags and releases.
+
+jobs:
+  eval:
+    name: Evaluate Workflow Preconditions
+    runs-on: ubuntu-latest
+    outputs:
+      changelog_artifact_name: ${{ env.CHANGELOG_ARTIFACT_NAME }}
+      changelog_name: ${{ env.CHANGELOG_NAME }}
+      document_artifact_name: ${{ env.DOCUMENT_ARTIFACT_NAME }}
+      document_base_name: ${{ env.DOCUMENT_BASE_NAME }}
+      should_run: ${{ steps.evaluate_run_conditions.outputs.should_run }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # Fetch all history for accurate commit count.
+
+      # Evaluate whether the workflow should run or not.
+      - name: Evaluate Run Conditions
+        id: evaluate_run_conditions
+        run: |
+          # This workflow should not run for the initial commit in the repo, as
+          # the initial template document is not a meaningful release to
+          # publish.
+          echo "Checking current commit count..."
+          if [ "$(git rev-list --count HEAD)" -eq 1 ]; then
+            # If this is running on the first commit, do not run the workflow.
+            echo "Initial commit detected; skipping workflow run."
+            echo "should_run=false" >> $GITHUB_OUTPUT
+          else
+            # Otherwise, the workflow should run.
+            echo "Multiple commits detected; running workflow."
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          fi
+
+  prep:
+    name: Prepare Version and Changelog
+    needs: [eval]
+    if: ${{ needs.eval.outputs.should_run == 'true' }}
+    uses: ./.github/workflows/prep-build.yml
+    with:
+      changelog-artifact-name: ${{ needs.eval.outputs.changelog_artifact_name }}
+      changelog-name: ${{ needs.eval.outputs.changelog_name }}
+      document-base-name: ${{ needs.eval.outputs.document_base_name }}
+
+  build:
+    name: Build LaTeX Document
+    needs: [eval, prep]
+    if: ${{ needs.eval.outputs.should_run == 'true' }}
+    uses: ./.github/workflows/build-latex.yml
+    with:
+      artifact-name: ${{ needs.eval.outputs.document_artifact_name }}
+      document-name: ${{ needs.prep.outputs.document-name }}
+
+  release:
+    name: Create Release
+    needs: [eval, prep, build]
+    if: ${{ needs.eval.outputs.should_run == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v5
+
+      - name: Download Build Artifacts
+        id: download-latex
+        uses: actions/download-artifact@v6
+        with:
+          name: ${{ needs.eval.outputs.document_artifact_name }}
+
+      - name: Download Changelog Artifact
+        id: download-changelog
+        uses: actions/download-artifact@v6
+        with:
+          name: ${{ needs.eval.outputs.changelog_artifact_name }}
+
+      # Create a draft release with the generated changelog and attach the PDF.
+      # This is needed for repos that use "immutable releases", since otherwise
+      # the release would be finalised before the PDF is attached causing an
+      # error.
+      #
+      # This also tags the commit with the release.
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prep.outputs.version }}
+          draft: true
+          body: ${{ needs.prep.outputs.changelog }}
+          files: |
+            ${{ steps.download-latex.outputs.download-path }}/*.pdf
+            ${{ steps.download-changelog.outputs.download-path }}/${{ needs.eval.outputs.changelog_name }}
+        env:
+          GIT_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Publish the release now that the PDF and changelog have been attached.
+      # The release becomes immutable after this step if immutable releases are
+      # enabled.
+      - name: Publish Draft Release
+        run: |
+          gh release edit ${{ needs.prep.outputs.version }} --draft=false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

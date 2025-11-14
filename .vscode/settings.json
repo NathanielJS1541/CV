@@ -1,0 +1,17 @@
+{
+    "cSpell.language": "en-GB",
+    "editor.bracketPairColorization.independentColorPoolPerBracketType": true,
+    "editor.rulers": [
+        80,
+        100
+    ],
+    "editor.wordWrap": "wordWrapColumn",
+    "latex-workshop.latex.autoBuild.cleanAndRetry.enabled": false,
+    "latex-workshop.latex.clean.subfolder.enabled": true,
+    "latex-workshop.latex.outDir": "%DIR%/build",
+    "markdown.extension.toc.levels": "2..6",
+    "pasteImage.insertPattern": "\\begin{center}\n    \\includegraphics[width=\\linewidth]{${imageSyntaxPrefix}${imageFilePath}${imageSyntaxSuffix}}\n\\end{center}",
+    "pasteImage.path": "${projectRoot}/images",
+    "pasteImage.showFilePathConfirmInputBox": true,
+    "trailing-spaces.deleteModifiedLinesOnly": true
+}
